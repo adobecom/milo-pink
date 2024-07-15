@@ -34,12 +34,15 @@ const MILO_BLOCKS = [
   'featured-article',
   'global-footer',
   'global-navigation',
+  'graybox',
   'footer',
   'gnav',
+  'hero-marquee',
   'how-to',
   'icon-block',
   'iframe',
   'instagram',
+  'locui',
   'marketo',
   'marquee',
   'marquee-anchors',
@@ -64,6 +67,7 @@ const MILO_BLOCKS = [
   'preflight',
   'promo',
   'quiz',
+  'quiz-entry',
   'quiz-marquee',
   'quiz-results',
   'tabs',
@@ -88,16 +92,16 @@ const AUTO_BLOCKS = [
   { gist: 'https://gist.github.com' },
   { caas: '/tools/caas' },
   { faas: '/tools/faas' },
-  { fragment: '/fragments/' },
+  { fragment: '/fragments/', styles: false },
   { instagram: 'https://www.instagram.com' },
-  { slideshare: 'https://www.slideshare.net' },
-  { tiktok: 'https://www.tiktok.com' },
+  { slideshare: 'https://www.slideshare.net', styles: false },
+  { tiktok: 'https://www.tiktok.com', styles: false },
   { twitter: 'https://twitter.com' },
   { vimeo: 'https://vimeo.com' },
   { vimeo: 'https://player.vimeo.com' },
   { youtube: 'https://www.youtube.com' },
   { youtube: 'https://youtu.be' },
-  { 'pdf-viewer': '.pdf' },
+  { 'pdf-viewer': '.pdf', styles: false },
   { video: '.mp4' },
   { merch: '/tools/ost?' },
 ];
@@ -136,6 +140,9 @@ export const MILO_EVENTS = { DEFERRED: 'milo:deferred' };
 
 const LANGSTORE = 'langstore';
 const PAGE_URL = new URL(window.location.href);
+const SLD = PAGE_URL.hostname.includes('.aem.') ? 'aem' : 'hlx';
+
+const PROMO_PARAM = 'promo';
 
 function getEnv(conf) {
   const { host } = window.location;
@@ -144,10 +151,11 @@ function getEnv(conf) {
   if (query) return { ...ENVS[query], consumer: conf[query] };
   if (host.includes('localhost')) return { ...ENVS.local, consumer: conf.local };
   /* c8 ignore start */
-  if (host.includes('hlx.page')
-    || host.includes('hlx.live')
+  if (host.includes(`${SLD}.page`)
+    || host.includes(`${SLD}.live`)
     || host.includes('stage.adobe')
-    || host.includes('corp.adobe')) {
+    || host.includes('corp.adobe')
+    || host.includes('graybox.adobe')) {
     return { ...ENVS.stage, consumer: conf.stage };
   }
   return { ...ENVS.prod, consumer: conf.prod };
@@ -228,7 +236,7 @@ export const [setConfig, updateConfig, getConfig] = (() => {
         console.log('Invalid or missing locale:', e);
       }
       config.locale.contentRoot = `${origin}${config.locale.prefix}${config.contentRoot ?? ''}`;
-      config.useDotHtml = !PAGE_URL.origin.includes('.hlx.')
+      config.useDotHtml = !PAGE_URL.origin.includes(`.${SLD}.`)
         && (conf.useDotHtml ?? PAGE_URL.pathname.endsWith('.html'));
       config.entitlements = handleEntitlements;
       config.consumerEntitlements = conf.entitlements || [];
@@ -440,16 +448,17 @@ export async function loadBlock(block) {
   }
 
   const name = block.classList[0];
-  const { miloLibs, codeRoot, expBlocks } = getConfig();
+  const hasStyles = AUTO_BLOCKS.find((ab) => Object.keys(ab).includes(name))?.styles ?? true;
+  const { miloLibs, codeRoot, mep } = getConfig();
 
   const base = miloLibs && MILO_BLOCKS.includes(name) ? miloLibs : codeRoot;
   let path = `${base}/blocks/${name}`;
 
-  if (expBlocks?.[name]) path = expBlocks[name];
+  if (mep?.blocks?.[name]) path = mep.blocks[name];
 
   const blockPath = `${path}/${name}`;
 
-  const styleLoaded = new Promise((resolve) => {
+  const styleLoaded = hasStyles && new Promise((resolve) => {
     loadStyle(`${blockPath}.css`, resolve);
   });
 
@@ -469,6 +478,7 @@ export async function loadBlock(block) {
       resolve();
     })();
   });
+
   await Promise.all([styleLoaded, scriptLoaded]);
   return block;
 }
@@ -487,7 +497,7 @@ export function decorateSVG(a) {
       ? new URL(`${window.location.origin}${a.href}`)
       : new URL(a.href);
 
-    const src = textUrl.hostname.includes('.hlx.') ? textUrl.pathname : textUrl;
+    const src = textUrl.hostname.includes(`.${SLD}.`) ? textUrl.pathname : textUrl;
 
     const img = createTag('img', { loading: 'lazy', src });
     if (altText) img.alt = altText;
@@ -513,7 +523,7 @@ export function decorateImageLinks(el) {
     const [source, alt, icon] = img.alt.split('|');
     try {
       const url = new URL(source.trim());
-      const href = url.hostname.includes('.hlx.') ? `${url.pathname}${url.hash}` : url.href;
+      const href = url.hostname.includes(`.${SLD}.`) ? `${url.pathname}${url.hash}` : url.href;
       if (alt?.trim().length) img.alt = alt.trim();
       const pic = img.closest('picture');
       const picParent = pic.parentElement;
@@ -606,12 +616,16 @@ export function decorateAutoBlock(a) {
 }
 
 export function decorateLinks(el) {
+  const config = getConfig();
   decorateImageLinks(el);
   const anchors = el.getElementsByTagName('a');
   return [...anchors].reduce((rdx, a) => {
     appendHtmlToLink(a);
     a.href = localizeLink(a.href);
     decorateSVG(a);
+    if (config.env?.name === 'stage' && config.stageDomainsMap?.[a.hostname]) {
+      a.href = a.href.replace(a.hostname, config.stageDomainsMap[a.hostname]);
+    }
     if (a.href.includes('#_blank')) {
       a.setAttribute('target', '_blank');
       a.href = a.href.replace('#_blank', '');
@@ -623,6 +637,15 @@ export function decorateLinks(el) {
       if (autoBlock) {
         rdx.push(a);
       }
+    }
+    // Custom action links
+    const loginEvent = '#_evt-login';
+    if (a.href.includes(loginEvent)) {
+      a.href = a.href.replace(loginEvent, '');
+      a.addEventListener('click', (e) => {
+        e.preventDefault();
+        window.adobeIMS?.signIn();
+      });
     }
     return rdx;
   }, []);
@@ -677,7 +700,9 @@ function decorateHeader() {
   const baseBreadcrumbs = getMetadata('breadcrumbs-base')?.length;
   const breadcrumbs = document.querySelector('.breadcrumbs');
   const autoBreadcrumbs = getMetadata('breadcrumbs-from-url') === 'on';
-  if (baseBreadcrumbs || breadcrumbs || autoBreadcrumbs) header.classList.add('has-breadcrumbs');
+  const dynamicNavActive = getMetadata('dynamic-nav') === 'on'
+    && window.sessionStorage.getItem('gnavSource') !== null;
+  if (!dynamicNavActive && (baseBreadcrumbs || breadcrumbs || autoBreadcrumbs)) header.classList.add('has-breadcrumbs');
   if (breadcrumbs) header.append(breadcrumbs);
   const promo = getMetadata('gnav-promo-source');
   if (promo?.length) header.classList.add('has-promo');
@@ -776,25 +801,27 @@ function decorateSections(el, isDoc) {
   return [...el.querySelectorAll(selector)].map(decorateSection);
 }
 
-export async function decorateFooterPromo() {
-  const footerPromoTag = getMetadata('footer-promo-tag');
-  const footerPromoType = getMetadata('footer-promo-type');
+export async function decorateFooterPromo(doc = document) {
+  const footerPromoTag = getMetadata('footer-promo-tag', doc);
+  const footerPromoType = getMetadata('footer-promo-type', doc);
   if (!footerPromoTag && footerPromoType !== 'taxonomy') return;
 
   const { default: initFooterPromo } = await import('../features/footer-promo.js');
-  await initFooterPromo(footerPromoTag, footerPromoType);
+  await initFooterPromo(footerPromoTag, footerPromoType, doc);
 }
 
 let imsLoaded;
 export async function loadIms() {
   imsLoaded = imsLoaded || new Promise((resolve, reject) => {
-    const { locale, imsClientId, imsScope, env, base } = getConfig();
+    const {
+      locale, imsClientId, imsScope, env, base, adobeid,
+    } = getConfig();
     if (!imsClientId) {
       reject(new Error('Missing IMS Client ID'));
       return;
     }
     const [unavMeta, ahomeMeta] = [getMetadata('universal-nav')?.trim(), getMetadata('adobe-home-redirect')];
-    const defaultScope = `AdobeID,openid,gnav${unavMeta && unavMeta !== 'off' ? ',pps.read,firefly_api' : ''}`;
+    const defaultScope = `AdobeID,openid,gnav${unavMeta && unavMeta !== 'off' ? ',pps.read,firefly_api,additional_info.roles,read_organizations' : ''}`;
     const timeout = setTimeout(() => reject(new Error('IMS timeout')), 5000);
     window.adobeid = {
       client_id: imsClientId,
@@ -810,6 +837,7 @@ export async function loadIms() {
         clearTimeout(timeout);
       },
       onError: reject,
+      ...adobeid,
     };
     const path = PAGE_URL.searchParams.get('useAlternateImsDomain')
       ? 'https://auth.services.adobe.com/imslib/imslib.min.js'
@@ -824,7 +852,11 @@ export async function loadIms() {
   return imsLoaded;
 }
 
-export async function loadMartech({ persEnabled = false, persManifests = [] } = {}) {
+export async function loadMartech({
+  persEnabled = false,
+  persManifests = [],
+  postLCP = false,
+} = {}) {
   // eslint-disable-next-line no-underscore-dangle
   if (window.marketingtech?.adobe?.launch && window._satellite) {
     return true;
@@ -839,33 +871,59 @@ export async function loadMartech({ persEnabled = false, persManifests = [] } = 
   loadIms().catch(() => {});
 
   const { default: initMartech } = await import('../martech/martech.js');
-  await initMartech({ persEnabled, persManifests });
+  await initMartech({ persEnabled, persManifests, postLCP });
 
   return true;
 }
 
-async function checkForPageMods() {
-  const offFlag = (val) => PAGE_URL.searchParams.get(val) === 'off';
-  if (offFlag('mep')) return;
-  const persMd = getMetadata('personalization');
-  const promoMd = getMetadata('manifestnames');
-  const targetMd = getMetadata('target');
-  let persManifests = [];
-  const persEnabled = persMd && persMd !== 'off' && !offFlag('personalization');
-  const targetEnabled = targetMd && targetMd !== 'off' && !offFlag('target') && !offFlag('martech');
-  const promoEnabled = promoMd && promoMd !== 'off' && !offFlag('promo');
-  const mepEnabled = persEnabled || targetEnabled || promoEnabled;
+const getMepValue = (val) => {
+  const valMap = { on: true, off: false, gnav: 'gnav' };
+  const finalVal = val?.toLowerCase().trim();
+  if (finalVal in valMap) return valMap[finalVal];
+  return finalVal;
+};
 
-  if (mepEnabled) {
-    const { base } = getConfig();
-    loadLink(
-      `${base}/features/personalization/personalization.js`,
-      { as: 'script', rel: 'modulepreload' },
-    );
+const getMdValue = (key) => {
+  const value = getMetadata(key);
+  if (value) {
+    return getMepValue(value);
   }
+  return false;
+};
+
+const getPromoMepEnablement = () => {
+  const mds = [
+    'apac_manifestnames',
+    'emea_manifestnames',
+    'americas_manifestnames',
+    'jp_manifestnames',
+    'manifestnames',
+  ];
+  const mdObject = mds.reduce((obj, key) => {
+    const val = getMdValue(key);
+    if (val) {
+      obj[key] = val;
+    }
+    return obj;
+  }, {});
+  if (Object.keys(mdObject).length) {
+    return mdObject;
+  }
+  return false;
+};
+
+export const getMepEnablement = (mdKey, paramKey = false) => {
+  const paramValue = PAGE_URL.searchParams.get(paramKey || mdKey);
+  if (paramValue) return getMepValue(paramValue);
+  if (PROMO_PARAM === paramKey) return getPromoMepEnablement();
+  return getMdValue(mdKey);
+};
+
+export const combineMepSources = async (persEnabled, promoEnabled, mepParam) => {
+  let persManifests = [];
 
   if (persEnabled) {
-    persManifests = persMd.toLowerCase()
+    persManifests = persEnabled.toLowerCase()
       .split(/,|(\s+)|(\\n)/g)
       .filter((path) => path?.trim())
       .map((manifestPath) => ({ manifestPath }));
@@ -873,50 +931,77 @@ async function checkForPageMods() {
 
   if (promoEnabled) {
     const { default: getPromoManifests } = await import('../features/personalization/promo-utils.js');
-    persManifests = persManifests.concat(getPromoManifests(promoMd, PAGE_URL.searchParams));
+    persManifests = persManifests.concat(getPromoManifests(promoEnabled, PAGE_URL.searchParams));
   }
 
-  const { env } = getConfig();
-  let previewOn = false;
-  const mep = PAGE_URL.searchParams.get('mep');
-  if (mep !== null || (env?.name !== 'prod' && mepEnabled)) {
-    previewOn = !offFlag('mepButton');
-    const { default: addPreviewToConfig } = await import('../features/personalization/add-preview-to-config.js');
-    persManifests = await addPreviewToConfig({
-      pageUrl: PAGE_URL,
-      mepEnabled,
-      persManifests,
+  if (mepParam && mepParam !== 'off') {
+    const persManifestPaths = persManifests.map((manifest) => {
+      const { manifestPath } = manifest;
+      if (manifestPath.startsWith('/')) return manifestPath;
+      try {
+        const url = new URL(manifestPath);
+        return url.pathname;
+      } catch (e) {
+        return manifestPath;
+      }
+    });
+
+    mepParam.split('---').forEach((manifestPair) => {
+      const manifestPath = manifestPair.trim().toLowerCase().split('--')[0];
+      if (!persManifestPaths.includes(manifestPath)) {
+        persManifests.push({ manifestPath });
+      }
     });
   }
+  return persManifests;
+};
 
-  if (targetEnabled) {
-    await loadMartech({ persEnabled: true, persManifests, targetMd });
-  } else if (persManifests.length) {
-    loadIms()
-      .then(() => {
-        if (window.adobeIMS.isSignedInUser()) loadMartech();
-      })
-      .catch((e) => { console.log('Unable to load IMS:', e); });
+async function checkForPageMods() {
+  const { mep: mepParam } = Object.fromEntries(PAGE_URL.searchParams);
+  if (mepParam === 'off') return;
+  const persEnabled = getMepEnablement('personalization');
+  const promoEnabled = getMepEnablement('manifestnames', PROMO_PARAM);
+  const targetEnabled = getMepEnablement('target');
+  const mepEnabled = persEnabled || targetEnabled || promoEnabled || mepParam;
+  if (!mepEnabled) return;
 
-    const { preloadManifests, applyPers } = await import('../features/personalization/personalization.js');
-    const manifests = preloadManifests({ persManifests }, { getConfig, loadLink });
+  const config = getConfig();
+  config.mep = { targetEnabled };
+  loadLink(
+    `${config.base}/features/personalization/personalization.js`,
+    { as: 'script', rel: 'modulepreload' },
+  );
 
-    await applyPers(manifests);
+  const persManifests = await combineMepSources(persEnabled, promoEnabled, mepParam);
+  if (targetEnabled === true) {
+    await loadMartech({ persEnabled: true, persManifests, targetEnabled });
+    return;
   }
+  if (!persManifests.length) return;
 
-  if (previewOn) {
-    import('../features/personalization/preview.js')
-      .then(({ default: decoratePreviewMode }) => decoratePreviewMode());
-  }
+  loadIms()
+    .then(() => {
+      if (window.adobeIMS.isSignedInUser()) loadMartech();
+    })
+    .catch((e) => { console.log('Unable to load IMS:', e); });
+
+  const { preloadManifests, applyPers } = await import('../features/personalization/personalization.js');
+  const manifests = preloadManifests({ persManifests }, { getConfig, loadLink });
+
+  await applyPers(manifests);
 }
 
 async function loadPostLCP(config) {
+  if (config.mep?.targetEnabled === 'gnav') {
+    await loadMartech({ persEnabled: true, postLCP: true });
+  } else {
+    loadMartech();
+  }
   const georouting = getMetadata('georouting') || config.geoRouting;
   if (georouting === 'on') {
     const { default: loadGeoRouting } = await import('../features/georoutingv2/georoutingv2.js');
     await loadGeoRouting(config, createTag, getMetadata, loadBlock, loadStyle);
   }
-  loadMartech();
   const header = document.querySelector('header');
   if (header) {
     header.classList.add('gnav-hide');
@@ -926,10 +1011,14 @@ async function loadPostLCP(config) {
   loadTemplate();
   const { default: loadFonts } = await import('./fonts.js');
   loadFonts(config.locale, loadStyle);
+  if (config.mep?.preview) {
+    import('../features/personalization/preview.js')
+      .then(({ default: decoratePreviewMode }) => decoratePreviewMode());
+  }
 }
 
 export function scrollToHashedElement(hash) {
-  if (!hash) return;
+  if (!hash || /=/.test(hash)) return; // skip if hash is used for deeplinking.
   const elementId = decodeURIComponent(hash).slice(1);
   let targetElement;
   try {
@@ -992,7 +1081,7 @@ function initSidekick() {
 
 function decorateMeta() {
   const { origin } = window.location;
-  const contents = document.head.querySelectorAll('[content*=".hlx."]');
+  const contents = document.head.querySelectorAll(`[content*=".${SLD}."]`);
   contents.forEach((meta) => {
     if (meta.getAttribute('property') === 'hlx:proxyUrl') return;
     try {
@@ -1055,6 +1144,8 @@ async function documentPostSectionLoading(config) {
   import('../martech/attributes.js').then((analytics) => {
     document.querySelectorAll('main > div').forEach((section, idx) => analytics.decorateSectionAnalytics(section, idx, config));
   });
+
+  document.body.appendChild(createTag('div', { id: 'page-load-ok-milo', style: 'display: none;' }));
 }
 
 async function processSection(section, config, isDoc) {
