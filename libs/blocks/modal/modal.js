@@ -1,3 +1,4 @@
+/* eslint-disable no-underscore-dangle */
 /* eslint-disable import/no-cycle */
 import { createTag, getMetadata, localizeLink, loadStyle, getConfig } from '../../utils/utils.js';
 
@@ -10,6 +11,9 @@ const CLOSE_ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="2
   </g>
 </svg>`;
 
+let isDelayedModal = false;
+let prevHash = '';
+
 export function findDetails(hash, el) {
   const id = hash.replace('#', '');
   const a = el || document.querySelector(`a[data-modal-hash="${hash}"]`);
@@ -17,15 +21,23 @@ export function findDetails(hash, el) {
   return { id, path, isHash: hash === window.location.hash };
 }
 
-export function sendAnalytics(event) {
-  // eslint-disable-next-line no-underscore-dangle
-  window._satellite?.track('event', {
+function fireAnalyticsEvent(event) {
+  const data = {
     xdm: {},
-    data: {
-      web: { webInteraction: { name: event?.type } },
-      _adobe_corpnew: { digitalData: event?.data },
-    },
-  });
+    data: { web: { webInteraction: { name: event?.type } } },
+  };
+  if (event?.data) data.data._adobe_corpnew = { digitalData: event.data };
+  window._satellite?.track('event', data);
+}
+
+export function sendAnalytics(event) {
+  if (window._satellite?.track) {
+    fireAnalyticsEvent(event);
+  } else {
+    window.addEventListener('alloy_sendEvent', () => {
+      fireAnalyticsEvent(event);
+    }, { once: true });
+  }
 }
 
 export function closeModal(modal) {
@@ -53,6 +65,11 @@ export function closeModal(modal) {
 
   const hashId = window.location.hash.replace('#', '');
   if (hashId === modal.id) window.history.pushState('', document.title, `${window.location.pathname}${window.location.search}`);
+  isDelayedModal = false;
+  if (prevHash) {
+    window.location.hash = prevHash;
+    prevHash = '';
+  }
 }
 
 function isElementInView(element) {
@@ -96,6 +113,16 @@ export async function getModal(details, custom) {
 
   if (custom) getCustomModal(custom, dialog);
   if (details) await getPathModal(details.path, dialog);
+  if (isDelayedModal) {
+    dialog.classList.add('delayed-modal');
+    const mediaBlock = dialog.querySelector('div.media');
+    if (mediaBlock) {
+      mediaBlock.classList.add('in-modal');
+      const { miloLibs, codeRoot } = getConfig();
+      const base = miloLibs || codeRoot;
+      loadStyle(`${base}/styles/rounded-corners.css`);
+    }
+  }
 
   const localeModal = id?.includes('locale-modal') ? 'localeModal' : 'milo';
   const analyticsEventName = window.location.hash ? window.location.hash.replace('#', '') : localeModal;
@@ -195,6 +222,7 @@ export function getHashParams(hashStr) {
 export function delayedModal(el) {
   const { hash, delay } = getHashParams(el?.dataset.modalHash);
   if (!delay || !hash) return false;
+  isDelayedModal = true;
   el.classList.add('hide-block');
   const modalOpenEvent = new Event(`${hash}:modalOpen`);
   const pagesModalWasShownOn = window.sessionStorage.getItem(`shown:${hash}`);
@@ -231,5 +259,8 @@ window.addEventListener('hashchange', (e) => {
   } else {
     const details = findDetails(window.location.hash, null);
     if (details) getModal(details);
+    if (e.oldURL?.includes('#')) {
+      prevHash = new URL(e.oldURL).hash;
+    }
   }
 });

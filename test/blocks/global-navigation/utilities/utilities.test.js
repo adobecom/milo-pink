@@ -1,10 +1,10 @@
 import { expect } from '@esm-bundle/chai';
 import sinon from 'sinon';
 import {
+  fetchAndProcessPlainHtml,
   toFragment,
   getFedsPlaceholderConfig,
   federatePictureSources,
-  getFederatedContentRoot,
   getAnalyticsValue,
   decorateCta,
   hasActiveLink,
@@ -16,14 +16,27 @@ import {
   logErrorFor,
   getFederatedUrl,
 } from '../../../../libs/blocks/global-navigation/utilities/utilities.js';
-import { setConfig } from '../../../../libs/utils/utils.js';
+import { setConfig, getConfig } from '../../../../libs/utils/utils.js';
 import { createFullGlobalNavigation, config } from '../test-utilities.js';
+import mepInBlock from '../mocks/mep-config.js';
 
 const baseHost = 'https://www.stage.adobe.com';
 describe('global navigation utilities', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
   });
+  it('fetchAndProcessPlainHtml with MEP', () => {
+    expect(fetchAndProcessPlainHtml).to.exist;
+    const mepConfig = getConfig();
+    mepConfig.mep = mepInBlock;
+    fetchAndProcessPlainHtml({ url: '/old/navigation' }).then((fragment) => {
+      const inNewMenu = fragment.querySelector('#only-in-new-menu');
+      expect(inNewMenu).to.exist;
+      const newMenu = fragment.querySelector('a[href*="mep-large-menu-table"]');
+      expect(newMenu).to.exist;
+    });
+  });
+
   it('toFragment', () => {
     expect(toFragment).to.exist;
     const fragment = toFragment`<div>test</div>`;
@@ -33,15 +46,6 @@ describe('global navigation utilities', () => {
     const fragment2 = toFragment`<span>${fragment}</span>`;
     expect(fragment2.innerHTML).to.equal('<div>test</div>');
     expect(fragment2.tagName).to.equal('SPAN');
-  });
-
-  // No tests for using the the live url and .hlx. urls
-  // as mocking window.location.origin is not possible
-  describe('getFedsContentRoot', () => {
-    it('should return content source for localhost', () => {
-      const contentSource = getFederatedContentRoot();
-      expect(contentSource).to.equal(baseHost);
-    });
   });
 
   describe('federatePictureSources', () => {
