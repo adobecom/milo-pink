@@ -26,6 +26,7 @@ const MILO_BLOCKS = [
   'carousel',
   'chart',
   'columns',
+  'editorial-card',
   'faas',
   'featured-article',
   'figure',
@@ -56,6 +57,7 @@ const MILO_BLOCKS = [
   'mobile-app-banner',
   'modal',
   'modal-metadata',
+  'notification',
   'pdf-viewer',
   'quote',
   'read-more',
@@ -712,9 +714,9 @@ function decorateHeader() {
 async function decorateIcons(area, config) {
   const icons = area.querySelectorAll('span.icon');
   if (icons.length === 0) return;
-  const { miloLibs, codeRoot } = config;
-  const base = miloLibs || codeRoot;
-  await new Promise((resolve) => { loadStyle(`${base}/features/icons/icons.css`, resolve); });
+  const { base } = config;
+  loadStyle(`${base}/features/icons/icons.css`);
+  loadLink(`${base}/img/icons/icons.svg`, { rel: 'preload', as: 'fetch', crossorigin: 'anonymous' });
   const { default: loadIcons } = await import('../features/icons/icons.js');
   await loadIcons(icons, config);
 }
