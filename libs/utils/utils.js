@@ -226,7 +226,7 @@ export function getLanguage(languages, locales, pathname = window.location.pathn
   }
 
   const isLegacyLocaleRoutingMode = !language
-      || (language.languageBased === false && !language.region);
+    || (language.languageBased === false && !language.region);
   if (isLegacyLocaleRoutingMode) {
     const locale = getLocale(locales, pathname);
     const englishLang = languages.en;
@@ -441,7 +441,7 @@ export function isInTextNode(node) {
 export function createTag(tag, attributes, html, options = {}) {
   const el = document.createElement(tag);
   if (html) {
-    if (html instanceof HTMLElement
+    if (html.nodeType === Node.ELEMENT_NODE
       || html instanceof SVGElement
       || html instanceof DocumentFragment) {
       el.append(html);
@@ -762,6 +762,7 @@ export function decorateImageLinks(el) {
   [...images].forEach((img) => {
     const [source, alt, icon] = img.alt.split('|');
     try {
+      if (!URL.canParse(source.trim())) return;
       const url = new URL(source.trim());
       const href = (url.hostname.includes('.aem.') || url.hostname.includes('.hlx.')) ? `${url.pathname}${url.search}${url.hash}` : url.href;
       img.alt = alt?.trim() || '';
