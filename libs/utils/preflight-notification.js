@@ -4,7 +4,7 @@ import { loadStyle, getConfig } from './utils.js';
 let wasDismissed = false;
 let sidekickObserver;
 let linkCheckListener;
-const sidekick = document.querySelector('aem-sidekick');
+const sidekick = document.querySelector('aem-sidekick, helix-sidekick');
 function openPreflightPanel() {
   if (!sidekick) return;
   sidekick.dispatchEvent(new CustomEvent('custom:preflight', { bubbles: true }));
@@ -85,10 +85,8 @@ function createObserver() {
     if (hasFailures) await createPreflightNotification();
   });
 
-  sidekickObserver.observe(document, {
+  sidekickObserver.observe(sidekick, {
     attributes: true,
-    childList: true,
-    subtree: true,
     attributeFilter: ['open'],
   });
 }
@@ -103,6 +101,8 @@ export default async function show() {
   if (isPublishButtonDisabled) return;
 
   createObserver();
+  if (sidekick && sidekick.getAttribute('open') !== 'true') return;
+
   const { hasFailures } = await getPreflightResults({
     url: window.location.href,
     area: document,
